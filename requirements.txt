@@ -1,4 +1,4 @@
 librosa
 matplotlib
-simpleaudio
+pygame
 numpy
