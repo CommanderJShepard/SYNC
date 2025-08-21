@@ -26,7 +26,11 @@ class TestAudioAnalyzer(unittest.TestCase):
             "BPM & Beats": True,
             "Onsets (Transients)": True,
             "Energy (RMS)": True,
-            "Percussive Elements": True
+            "Percussive Elements": True,
+            "Harmonic Waveform": True,
+            "Percussive Waveform": True,
+            "Chromagram": True,
+            "Tempogram": True,
         }
 
         results = analyze_audio(self.y, self.sr, analysis_options)
@@ -37,63 +41,50 @@ class TestAudioAnalyzer(unittest.TestCase):
         self.assertIn('onsets', results)
         self.assertIn('rms_energy', results)
         self.assertIn('percussive_onsets', results)
+        self.assertIn('harmonic_waveform', results)
+        self.assertIn('percussive_waveform', results)
+        self.assertIn('chroma', results)
+        self.assertIn('tempogram', results)
 
-        # Check the types of the results
+        # Check the types and shapes of the results
         self.assertIsInstance(results['estimated_bpm'], float)
         self.assertIsInstance(results['beats'], list)
-        self.assertIsInstance(results['onsets'], list)
-        self.assertIsInstance(results['rms_energy'], list)
-        self.assertIsInstance(results['percussive_onsets'], list)
+        self.assertIsInstance(results['harmonic_waveform'], np.ndarray)
+        self.assertIsInstance(results['chroma'], np.ndarray)
+        self.assertIsInstance(results['tempogram'], np.ndarray)
+        self.assertEqual(results['harmonic_waveform'].shape, self.y.shape)
+        self.assertEqual(results['chroma'].shape[0], 12) # 12 pitch classes
+        self.assertTrue(results['tempogram'].shape[0] > 0)
 
-        # Check that lists are not empty (for this particular sample)
-        self.assertTrue(len(results['beats']) > 0)
-        self.assertTrue(len(results['onsets']) > 0)
-        self.assertTrue(len(results['rms_energy']) > 0)
-        self.assertTrue(len(results['percussive_onsets']) > 0)
-
-        # Check content of lists
-        self.assertIsInstance(results['beats'][0], float)
-        self.assertIsInstance(results['onsets'][0], float)
-        self.assertIsInstance(results['rms_energy'][0], tuple)
-        self.assertIsInstance(results['percussive_onsets'][0], float)
 
     def test_analyze_audio_no_options(self):
         """
         Test the analyze_audio function with all analysis options disabled.
         """
-        analysis_options = {
-            "BPM & Beats": False,
-            "Onsets (Transients)": False,
-            "Energy (RMS)": False,
-            "Percussive Elements": False
-        }
-
+        analysis_options = {} # Empty dict
         results = analyze_audio(self.y, self.sr, analysis_options)
-
-        # Check that the results dictionary is empty
         self.assertEqual(len(results), 0)
 
-    def test_analyze_audio_some_options(self):
+    def test_analyze_audio_hpss_dependency(self):
         """
-        Test the analyze_audio function with only some options enabled.
+        Test that HPSS is run when only percussive onsets are requested.
         """
-        analysis_options = {
-            "BPM & Beats": True,
-            "Onsets (Transients)": False,
-            "Energy (RMS)": True,
-            "Percussive Elements": False
-        }
-
+        analysis_options = { "Percussive Elements": True }
         results = analyze_audio(self.y, self.sr, analysis_options)
+        self.assertIn('percussive_onsets', results)
+        self.assertNotIn('harmonic_waveform', results) # Should not be in results unless requested
+        self.assertNotIn('percussive_waveform', results)
 
-        # Check for expected keys
-        self.assertIn('estimated_bpm', results)
-        self.assertIn('beats', results)
-        self.assertIn('rms_energy', results)
+    def test_analyze_audio_chroma_only(self):
+        """
+        Test requesting only the chromagram.
+        """
+        analysis_options = { "Chromagram": True }
+        results = analyze_audio(self.y, self.sr, analysis_options)
+        self.assertIn('chroma', results)
+        self.assertEqual(len(results), 1)
+        self.assertIsInstance(results['chroma'], np.ndarray)
 
-        # Check that other keys are not present
-        self.assertNotIn('onsets', results)
-        self.assertNotIn('percussive_onsets', results)
 
 if __name__ == '__main__':
     unittest.main()

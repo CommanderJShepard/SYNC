@@ -33,7 +33,8 @@ class RhythmKickboxingLevelEditor:
         self.temp_audio_file = None
 
         # UI state
-        self.is_separated_view = False
+        self.is_choreography_separated = False
+        self.is_analysis_separated = False
 
         # UI elements
         self.playback_position_marker = None
@@ -62,15 +63,16 @@ class RhythmKickboxingLevelEditor:
         self.fig = plt.figure(figsize=(12, 6))
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.visualization_frame)
 
-        toolbar = NavigationToolbar2Tk(self.canvas, self.visualization_frame)
-        toolbar.update()
+        self.toolbar = NavigationToolbar2Tk(self.canvas, self.visualization_frame)
+        self.toolbar.update()
 
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         self.canvas.mpl_connect('button_press_event', self.on_canvas_click)
 
     def setup_controls(self, parent_frame):
+        # Top row of buttons
         file_ops_frame = ttk.Frame(parent_frame)
-        file_ops_frame.pack(fill=tk.X, pady=5)
+        file_ops_frame.pack(fill=tk.X, pady=2)
 
         self.upload_btn = ttk.Button(file_ops_frame, text="Upload Song", command=self.upload_song)
         self.upload_btn.pack(side=tk.LEFT, padx=5)
@@ -78,29 +80,39 @@ class RhythmKickboxingLevelEditor:
         self.analyze_btn.pack(side=tk.LEFT, padx=5)
         self.export_btn = ttk.Button(file_ops_frame, text="Export Level", command=self.export_level, state=tk.DISABLED)
         self.export_btn.pack(side=tk.LEFT, padx=5)
-        self.separate_btn = ttk.Button(file_ops_frame, text="Separate Timelines", command=self.toggle_timeline_view, state=tk.DISABLED)
-        self.separate_btn.pack(side=tk.LEFT, padx=5)
 
+        # View controls
+        view_ops_frame = ttk.Frame(parent_frame)
+        view_ops_frame.pack(fill=tk.X, pady=2)
+        self.separate_choreo_btn = ttk.Button(view_ops_frame, text="Separate Choreography", command=self.toggle_choreography_view, state=tk.DISABLED)
+        self.separate_choreo_btn.pack(side=tk.LEFT, padx=5)
+        self.separate_analysis_btn = ttk.Button(view_ops_frame, text="Separate Analysis", command=self.toggle_analysis_view, state=tk.DISABLED)
+        self.separate_analysis_btn.pack(side=tk.LEFT, padx=5)
+
+
+        # Analysis options
         analysis_options_frame = ttk.LabelFrame(parent_frame, text="Analysis Options")
-        analysis_options_frame.pack(fill=tk.X, pady=10, ipady=5)
+        analysis_options_frame.pack(fill=tk.X, pady=5, ipady=5)
         self.analysis_vars = {
-            "BPM & Beats": tk.BooleanVar(value=True),
-            "Onsets (Transients)": tk.BooleanVar(value=True),
-            "Energy (RMS)": tk.BooleanVar(value=True),
-            "Percussive Elements": tk.BooleanVar(value=True)
+            "BPM & Beats": tk.BooleanVar(value=True), "Onsets (Transients)": tk.BooleanVar(value=True),
+            "Energy (RMS)": tk.BooleanVar(value=True), "Percussive Elements": tk.BooleanVar(value=True),
+            "Harmonic Waveform": tk.BooleanVar(value=False), "Percussive Waveform": tk.BooleanVar(value=False),
+            "Chromagram": tk.BooleanVar(value=False), "Tempogram": tk.BooleanVar(value=False),
         }
         for text, var in self.analysis_vars.items():
-            ttk.Checkbutton(analysis_options_frame, text=text, variable=var).pack(side=tk.LEFT, padx=10)
+            ttk.Checkbutton(analysis_options_frame, text=text, variable=var).pack(side=tk.LEFT, padx=5, anchor='w')
 
+        # Playback controls
         playback_frame = ttk.Frame(parent_frame)
-        playback_frame.pack(fill=tk.X, pady=5)
+        playback_frame.pack(fill=tk.X, pady=2)
         self.play_pause_btn = ttk.Button(playback_frame, text="Play", command=self.toggle_playback, state=tk.DISABLED)
         self.play_pause_btn.pack(side=tk.LEFT, padx=5)
         self.stop_btn = ttk.Button(playback_frame, text="Stop", command=self.stop_audio, state=tk.DISABLED)
         self.stop_btn.pack(side=tk.LEFT, padx=5)
 
+        # Speed control
         speed_frame = ttk.Frame(parent_frame)
-        speed_frame.pack(fill=tk.X, pady=5)
+        speed_frame.pack(fill=tk.X, pady=2)
         ttk.Label(speed_frame, text="Speed:").pack(side=tk.LEFT, padx=5)
         self.speed_var = tk.DoubleVar(value=1.0)
         self.speed_scale = ttk.Scale(speed_frame, from_=0.5, to=2.0, orient=tk.HORIZONTAL, variable=self.speed_var, command=self.update_speed_label)
@@ -127,8 +139,8 @@ class RhythmKickboxingLevelEditor:
             pygame.mixer.quit()
             pygame.mixer.init(frequency=self.sampling_rate)
 
-            self.plot_waveform()
-            for btn in [self.analyze_btn, self.play_pause_btn, self.stop_btn, self.export_btn, self.separate_btn]:
+            self.plot_layout()
+            for btn in [self.analyze_btn, self.play_pause_btn, self.stop_btn, self.export_btn, self.separate_choreo_btn, self.separate_analysis_btn]:
                 btn['state'] = tk.NORMAL
             self.is_playing = False
             self.is_paused = False
@@ -136,55 +148,79 @@ class RhythmKickboxingLevelEditor:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load audio file: {e}")
 
-    def plot_waveform(self):
+    def plot_layout(self):
         self.fig.clear()
-        if self.is_separated_view:
+
+        if self.is_analysis_separated:
+            analysis_plots = [k for k, v in self.analysis_vars.items() if v.get() and k in ['Harmonic Waveform', 'Percussive Waveform', 'Energy (RMS)', 'Chromagram', 'Tempogram']]
+            num_plots = 1 + len(analysis_plots)
+            self.axes = self.fig.subplots(nrows=num_plots, ncols=1, sharex=True)
+            if num_plots == 1: self.axes = [self.axes]
+            self.ax = self.axes[0]
+            librosa.display.waveshow(self.audio_data, sr=self.sampling_rate, ax=self.ax, alpha=0.7)
+            self.ax.set_title("Main Waveform")
+            for i, key in enumerate(analysis_plots):
+                self.axes[i+1].set_ylabel(key, rotation=0, ha='right', va='center', fontsize=8)
+        elif self.is_choreography_separated:
             gs_kw = dict(height_ratios=[3] + [1] * len(self.strike_types))
             self.axes = self.fig.subplots(nrows=len(self.strike_types) + 1, ncols=1, sharex=True, gridspec_kw=gs_kw)
             self.ax = self.axes[0]
             librosa.display.waveshow(self.audio_data, sr=self.sampling_rate, ax=self.ax, alpha=0.5)
             self.ax.set_title("Song Waveform")
-
             for i, strike_type in enumerate(self.strike_types):
                 self.axes[i+1].set_ylabel(strike_type, rotation=0, ha='right', va='center', fontsize=8)
-                self.axes[i+1].set_yticks([])
-                self.axes[i+1].grid(True, which='major', axis='x', linestyle='--')
-            plt.xlabel("Time (s)")
         else:
             self.ax = self.fig.add_subplot(111)
             self.axes = [self.ax]
             librosa.display.waveshow(self.audio_data, sr=self.sampling_rate, ax=self.ax, alpha=0.5)
             self.ax.set_title("Song Waveform")
-            self.ax.set_xlabel("Time (s)")
 
-        self.ax.set_ylabel("Amplitude")
+        for ax_ in self.axes:
+            ax_.minorticks_on()
+            ax_.grid(True, which='major', axis='x', linestyle='-', linewidth='0.5', color='grey')
+            ax_.grid(True, which='minor', axis='x', linestyle=':', linewidth='0.5', color='lightgrey')
+
+        self.axes[-1].set_xlabel("Time (s)")
+        self.fig.tight_layout()
         self.canvas.draw()
 
     def analyze_music(self):
         if not hasattr(self, 'ax') or self.ax is None: return
         print("Analyzing music...")
+        self.plot_layout()
+
         analysis_options = {key: var.get() for key, var in self.analysis_vars.items()}
         self.analysis_results = analyze_audio(self.audio_data, self.sampling_rate, analysis_options)
 
-        # Clear previous analysis visuals
-        for line in self.ax.lines: line.remove()
-        for vline in self.ax.collections: vline.remove()
+        main_ax = self.axes[0]
 
-        if "beats" in self.analysis_results:
-            self.ax.vlines(self.analysis_results['beats'], -1, 1, color='b', linestyle='--', label=f"Beats (BPM: {self.analysis_results.get('estimated_bpm', 0):.2f})")
-        if "onsets" in self.analysis_results:
-            self.ax.vlines(self.analysis_results['onsets'], -1, 1, color='r', linestyle=':', label='Onsets')
-        if "rms_energy" in self.analysis_results:
-            rms_data = self.analysis_results['rms_energy']
-            times = [p[0] for p in rms_data]
-            rms_values = np.array([p[1] for p in rms_data])
-            if rms_values.size > 0:
-                rms_normalized = rms_values / np.max(rms_values) if np.max(rms_values) > 0 else rms_values
-                self.ax.plot(times, rms_normalized, color='g', alpha=0.6, label='Energy (RMS)')
-        if "percussive_onsets" in self.analysis_results:
-            self.ax.vlines(self.analysis_results['percussive_onsets'], -1, 1, color='y', linestyle='-.', label='Percussive Onsets')
+        if "beats" in self.analysis_results: main_ax.vlines(self.analysis_results['beats'], -1, 1, color='b', linestyle='--', label=f"Beats ({self.analysis_results.get('estimated_bpm', 0):.2f} BPM)")
+        if "onsets" in self.analysis_results: main_ax.vlines(self.analysis_results['onsets'], -1, 1, color='r', linestyle=':', label='Onsets')
+        if "percussive_onsets" in self.analysis_results: main_ax.vlines(self.analysis_results['percussive_onsets'], -1, 1, color='y', linestyle='-.', label='Percussive Onsets')
 
-        self.ax.legend()
+        if self.is_analysis_separated:
+            plot_map = {p: i+1 for i, p in enumerate([k for k, v in self.analysis_vars.items() if v.get() and k in ['Harmonic Waveform', 'Percussive Waveform', 'Energy (RMS)', 'Chromagram', 'Tempogram']])}
+            if "harmonic_waveform" in self.analysis_results: librosa.display.waveshow(self.analysis_results['harmonic_waveform'], sr=self.sampling_rate, ax=self.axes[plot_map['Harmonic Waveform']], alpha=0.7)
+            if "percussive_waveform" in self.analysis_results: librosa.display.waveshow(self.analysis_results['percussive_waveform'], sr=self.sampling_rate, ax=self.axes[plot_map['Percussive Waveform']], alpha=0.7)
+            if "rms_energy" in self.analysis_results:
+                times = [p[0] for p in self.analysis_results['rms_energy']]
+                rms_values = np.array([p[1] for p in self.analysis_results['rms_energy']])
+                self.axes[plot_map['Energy (RMS)']].plot(times, rms_values, color='g')
+            if "chroma" in self.analysis_results:
+                img = librosa.display.specshow(self.analysis_results['chroma'], y_axis='chroma', x_axis='time', ax=self.axes[plot_map['Chromagram']], sr=self.sampling_rate)
+                self.fig.colorbar(img, ax=self.axes[plot_map['Chromagram']])
+            if "tempogram" in self.analysis_results:
+                img = librosa.display.specshow(self.analysis_results['tempogram'], sr=self.sampling_rate, x_axis='time', y_axis='tempo', ax=self.axes[plot_map['Tempogram']], hop_length=512)
+                self.fig.colorbar(img, ax=self.axes[plot_map['Tempogram']])
+        else:
+            if "rms_energy" in self.analysis_results:
+                times = [p[0] for p in self.analysis_results['rms_energy']]
+                rms_values = np.array([p[1] for p in self.analysis_results['rms_energy']])
+                if rms_values.size > 0:
+                    rms_normalized = rms_values / np.max(rms_values) if np.max(rms_values) > 0 else rms_values
+                    main_ax.plot(times, rms_normalized, color='g', alpha=0.6, label='Energy (RMS)')
+
+        main_ax.legend()
         self.canvas.draw()
         print("Analysis complete.")
 
@@ -236,18 +272,14 @@ class RhythmKickboxingLevelEditor:
             current_time_original = current_time_stretched / self.current_playback_rate
 
             if self.playback_position_marker: self.playback_position_marker.remove()
-            self.playback_position_marker = self.ax.axvline(current_time_original, color='purple', lw=2)
+            self.playback_position_marker = self.axes[0].axvline(current_time_original, color='purple', lw=2)
             self.canvas.draw_idle()
             self.root.after(50, self.update_playback_marker)
         elif not pygame.mixer.music.get_busy() and self.is_playing:
             self.stop_audio()
 
     def on_canvas_click(self, event):
-        clicked_ax = None
-        for ax in self.axes:
-            if event.inaxes == ax:
-                clicked_ax = ax
-                break
+        clicked_ax = next((ax for ax in self.axes if event.inaxes == ax), None)
         if clicked_ax is None: return
         timestamp = event.xdata
         if event.button == 1: self.show_choreography_menu(event.x, event.y, timestamp)
@@ -281,18 +313,30 @@ class RhythmKickboxingLevelEditor:
             self.redraw_choreography()
             print(f"Deleted note at {closest_note['timestamp']:.2f}s")
 
-    def toggle_timeline_view(self):
-        self.is_separated_view = not self.is_separated_view
-        self.separate_btn.config(text="Combine Timelines" if self.is_separated_view else "Separate Timelines")
-        self.plot_waveform()
+    def toggle_choreography_view(self):
+        if self.is_analysis_separated: self.is_analysis_separated = False
+        self.is_choreography_separated = not self.is_choreography_separated
+        self.update_view_buttons()
+        self.plot_layout()
         if self.analysis_results: self.analyze_music()
         self.redraw_choreography()
+
+    def toggle_analysis_view(self):
+        if self.is_choreography_separated: self.is_choreography_separated = False
+        self.is_analysis_separated = not self.is_analysis_separated
+        self.update_view_buttons()
+        self.analyze_music()
+        self.redraw_choreography()
+
+    def update_view_buttons(self):
+        self.separate_choreo_btn.config(text="Combine Choreography" if self.is_choreography_separated else "Separate Choreography")
+        self.separate_analysis_btn.config(text="Combine Analysis" if self.is_analysis_separated else "Separate Analysis")
 
     def redraw_choreography(self):
         for marker in self.choreography_markers: marker.remove()
         self.choreography_markers.clear()
 
-        if self.is_separated_view:
+        if self.is_choreography_separated:
             for note in self.choreography:
                 try:
                     strike_index = self.strike_types.index(note['value'])
@@ -306,7 +350,7 @@ class RhythmKickboxingLevelEditor:
         else:
             for note in self.choreography:
                 color = 'm' if note['type'] == 'strike' else 'c'
-                marker = self.ax.axvline(note['timestamp'], color=color, lw=2, linestyle='-')
+                marker = self.axes[0].axvline(note['timestamp'], color=color, lw=2, linestyle='-')
                 self.choreography_markers.append(marker)
         self.canvas.draw()
 
@@ -322,7 +366,7 @@ class RhythmKickboxingLevelEditor:
             "song_filename": os.path.basename(self.audio_file_path),
             "song_duration_seconds": song_duration,
             "estimated_bpm": self.analysis_results.get('estimated_bpm', 0),
-            "analysis_data": {k: self.analysis_results.get(k, []) for k in ['beats', 'onsets', 'percussive_onsets']},
+            "analysis_data": {k: v.tolist() if isinstance(v, np.ndarray) else v for k, v in self.analysis_results.items()},
             "choreography": self.choreography
         }
         try:
